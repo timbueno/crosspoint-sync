@@ -1,35 +1,15 @@
 import crypto from 'node:crypto';
 import { Hono } from 'hono';
 import { deleteCookie } from 'hono/cookie';
-import { withTransaction, type DB } from '../db/db.js';
+import type { DB } from '../db/db.js';
 import type { Config } from '../config.js';
 import { masterAuth, type AppEnv } from '../auth/middleware.js';
 import { hashKey, verifyKey } from '../auth/password.js';
 import { invalidateAuthCache } from '../auth/middleware.js';
 import { SESSION_COOKIE } from '../auth/session.js';
 import { nowSeconds } from '../models/sync.js';
+import { deleteKosyncUserData } from '../users/delete-user.js';
 import { USERNAME_RE } from './kosync.js';
-
-/** Permanently delete a kosync user and every row of its reading data. */
-function deleteKosyncUserData(db: DB, userId: number, username: string): void {
-  withTransaction(db, () => {
-    for (const table of [
-      'connector_queue',
-      'connector_matches',
-      'connector_accounts',
-      'stats_device_book',
-      'stats_device_global',
-      'clippings',
-      'bookmarks',
-      'documents',
-      'progress',
-    ]) {
-      db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).run(userId);
-    }
-    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-  });
-  invalidateAuthCache(username);
-}
 
 /**
  * Manage the CrossPoint Sync (KOSync) account linked under a master account.
