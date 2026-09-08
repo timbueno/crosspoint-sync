@@ -55,7 +55,7 @@ describe('connector management API', () => {
     expect(body.encryption).toBe('enabled');
     const ids = body.connectors.map((c: { id: string }) => c.id).sort();
     // Readwise is hidden for now; still registered but not listed.
-    expect(ids).toEqual(['audiobookshelf', 'bookfusion', 'hardcover', 'kosync']);
+    expect(ids).toEqual(['audiobookshelf', 'bookfusion', 'hardcover', 'kosync', 'microblog']);
     expect(body.connectors.every((c: { linked: boolean }) => !c.linked)).toBe(true);
   });
 
@@ -103,6 +103,81 @@ describe('connector management API', () => {
       body: JSON.stringify({ credential: { token: 'bad' } }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('rejects credentials sent over non-loopback HTTP', async () => {
+    const fake = fakeTransport();
+    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    const res = await app.request('http://sync.example.com/api/v1/connectors/hardcover', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ credential: { token: 'hc-token' } }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ message: expect.stringContaining('HTTPS') });
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('accepts credentials forwarded from an HTTPS reverse proxy', async () => {
+    const fake = fakeTransport();
+    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    const { app } = makeTestApp({ trustProxy: true }, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    const res = await app.request('http://sync.example.com/api/v1/connectors/hardcover', {
+      method: 'PUT',
+      headers: { ...headers, 'x-forwarded-proto': 'https' },
+      body: JSON.stringify({ credential: { token: 'hc-token' } }),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects a forged forwarded HTTPS header when proxy trust is disabled', async () => {
+    const fake = fakeTransport();
+    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    const res = await app.request('http://sync.example.com/api/v1/connectors/hardcover', {
+      method: 'PUT',
+      headers: { ...headers, 'x-forwarded-proto': 'https' },
+      body: JSON.stringify({ credential: { token: 'hc-token' } }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('rejects a forged loopback Host from a remote peer', async () => {
+    const fake = fakeTransport();
+    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    const res = await app.request('http://localhost/api/v1/connectors/hardcover', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ credential: { token: 'hc-token' } }),
+    }, { incoming: { socket: { remoteAddress: '203.0.113.10' } } });
+
+    expect(res.status).toBe(400);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('fails closed when a Node request has no peer address', async () => {
+    const fake = fakeTransport();
+    fake.on('graphql', 200, { data: { me: [{ username: 'julia' }] } });
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    const res = await app.request('http://localhost/api/v1/connectors/hardcover', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ credential: { token: 'hc-token' } }),
+    }, { incoming: { socket: {} } });
+
+    expect(res.status).toBe(400);
+    expect(fake.calls).toHaveLength(0);
   });
 
   it('unlink wipes account, matches, and queue', async () => {

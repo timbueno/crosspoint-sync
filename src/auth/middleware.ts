@@ -15,6 +15,10 @@ export interface AuthedAccount {
 }
 
 export type AppEnv = {
+  Bindings: {
+    /** Present when served by @hono/node-server; omitted by Hono's in-memory test helper. */
+    incoming?: { socket?: { remoteAddress?: string } };
+  };
   Variables: {
     /** The kosync sync identity that owns the reading data (device or resolved from web session). */
     user: AuthedUser;

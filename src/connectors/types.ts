@@ -94,6 +94,18 @@ export type PushResult =
   | { ok: true }
   | { ok: false; retryable: boolean; error: string; needsReauth?: boolean };
 
+/** Operational failure for connector lifecycle work. */
+export class ConnectorOperationError extends Error {
+  constructor(
+    message: string,
+    public readonly retryable: boolean,
+    public readonly needsReauth = false
+  ) {
+    super(message);
+    this.name = 'ConnectorOperationError';
+  }
+}
+
 export interface ValidateResult {
   ok: boolean;
   accountLabel?: string;
@@ -143,8 +155,24 @@ export interface Connector {
   /** Validate a credential and return the account label if possible. */
   validate(cred: Credential, http: HttpTransport): Promise<ValidateResult>;
 
+  /** Return false to acknowledge an event without matching or pushing it. */
+  shouldPush?(ev: OutboundEvent, canonicalPercentage?: number | null): boolean;
+
   /** Resolve a document to an external book id. Null = no confident match. */
-  match(cred: Credential, doc: DocumentMeta, http: HttpTransport): Promise<Match | null>;
+  match(
+    cred: Credential,
+    doc: DocumentMeta,
+    http: HttpTransport,
+    ev?: OutboundEvent
+  ): Promise<Match | null>;
+
+  /** Create an external book only after matching found no existing record. */
+  createBook?(
+    cred: Credential,
+    doc: DocumentMeta,
+    ev: OutboundEvent,
+    http: HttpTransport
+  ): Promise<Match | null>;
 
   /** Push one outbound event. Only called for write-capable connectors. */
   push(cred: Credential, match: Match, ev: OutboundEvent, http: HttpTransport): Promise<PushResult>;

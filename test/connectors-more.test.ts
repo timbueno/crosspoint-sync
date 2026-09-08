@@ -653,6 +653,47 @@ describe('bookfusion connector', () => {
     expect(list.connectors.find((c: { id: string }) => c.id === 'bookfusion').linked).toBe(true);
   });
 
+  it('rejects device-link begin over non-loopback HTTP', async () => {
+    const fake = fakeTransport();
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    fake.on('/api/user/auth/device', 200, {
+      device_code: 'DC', user_code: 'WXYZ', verification_uri: 'https://bookfusion.com/link',
+    });
+
+    const begin = await app.request(
+      'http://sync.example.com/api/v1/connectors/bookfusion/link/begin',
+      { method: 'POST', headers }
+    );
+
+    expect(begin.status).toBe(400);
+    expect(await begin.json()).toMatchObject({ message: expect.stringContaining('HTTPS') });
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('rejects device-link poll over non-loopback HTTP without storing the credential', async () => {
+    const fake = fakeTransport();
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    fake.on('/api/user/auth/token', 200, { access_token: 'BF-TOKEN' });
+    fake.on('/api/user/books/search', 200, {});
+
+    const poll = await app.request(
+      'http://sync.example.com/api/v1/connectors/bookfusion/link/poll',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ device_code: 'DC' }),
+      }
+    );
+
+    expect(poll.status).toBe(400);
+    expect(await poll.json()).toMatchObject({ message: expect.stringContaining('HTTPS') });
+    expect(fake.calls).toHaveLength(0);
+    const list = await (await app.request('/api/v1/connectors', { headers })).json();
+    expect(list.connectors.find((c: { id: string }) => c.id === 'bookfusion').linked).toBe(false);
+  });
+
   it('push maps 0..1 to 0..100 reading_position', async () => {
     const fake = fakeTransport();
     fake.on('/reading_position', 200, {});

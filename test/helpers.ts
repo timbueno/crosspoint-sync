@@ -23,6 +23,7 @@ export function makeTestApp(
   const config: Config = {
     registrationDisabled: false,
     authRateLimitPerMinute: 0, // disabled in tests (limiter state is per-app anyway)
+    trustProxy: false,
     ...configOverrides,
   };
   return { app: createApp(db, config, opts), db };

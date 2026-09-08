@@ -47,7 +47,7 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   v1.route('/', clippingRoutes(db));
   v1.route('/', statsRoutes(db));
   v1.route('/', documentRoutes(db));
-  v1.route('/', connectorRoutes(db, opts.connectorTransport));
+  v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy));
   app.route('/api/v1', v1);
 
   return app;

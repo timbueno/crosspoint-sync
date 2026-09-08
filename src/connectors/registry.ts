@@ -4,6 +4,7 @@ import { readwiseConnector } from './readwise.js';
 import { kosyncConnector } from './kosync.js';
 import { bookfusionConnector } from './bookfusion.js';
 import { audiobookshelfConnector } from './audiobookshelf.js';
+import { microblogConnector } from './microblog.js';
 
 /** All connectors known to this build. */
 const CONNECTORS: Connector[] = [
@@ -12,6 +13,7 @@ const CONNECTORS: Connector[] = [
   readwiseConnector,
   bookfusionConnector,
   audiobookshelfConnector,
+  microblogConnector,
 ];
 
 const byId = new Map(CONNECTORS.map((c) => [c.id, c]));

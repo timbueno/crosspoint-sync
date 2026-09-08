@@ -21,7 +21,7 @@ const FAVICON = fs.readFileSync(path.join(ASSETS_DIR, 'favicon.png'));
 // Service app icons, served at /icons/:id.png. Loaded once at boot; a missing
 // file just means no icon for that service (the UI falls back gracefully).
 const SERVICE_ICONS = new Map<string, Buffer>();
-for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwise']) {
+for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'bookfusion', 'readwise', 'microblog']) {
   try {
     SERVICE_ICONS.set(id, fs.readFileSync(path.join(ASSETS_DIR, 'icons', `${id}.png`)));
   } catch {
@@ -225,6 +225,9 @@ const LANDING = shell(
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/hardcover.png" alt="" width="34" height="34"><div><div class="name">Hardcover</div>
        <div class="desc">Keep your Hardcover shelf and reading progress up to date automatically.</div></div></div>
        <span class="pill warn">beta</span></div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/microblog.png" alt="" width="34" height="34"><div><div class="name">Micro.blog</div>
+       <div class="desc">Keep your Currently reading and Finished reading bookshelves up to date automatically.</div></div></div>
+       <span class="pill">ready</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/audiobookshelf.png" alt="" width="34" height="34"><div><div class="name">Audiobookshelf</div>
        <div class="desc">Keep your place between the ebook and the audiobook, both ways. Read some, then pick up listening right where you left off.</div></div></div>
        <span class="pill">ready</span></div>
@@ -523,13 +526,34 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 async function jget(u){ const r = await fetch(u); return { ok:r.ok, status:r.status, data: await r.json().catch(()=>({})) }; }
 async function jsend(u, m='POST', body){ const r = await fetch(u,{method:m,headers:body?{'content-type':'application/json'}:undefined, body: body?JSON.stringify(body):undefined}); return { ok:r.ok, status:r.status, data: await r.json().catch(()=>({})) }; }
+function secureCredentialConnection() {
+  return location.protocol === 'https:' || location.hostname === 'localhost'
+    || location.hostname === '127.0.0.1' || location.hostname === '[::1]';
+}
+async function linkCredential(body) {
+  if (!secureCredentialConnection()) {
+    return { ok:false, data:{ message:'Use HTTPS to link a service.' } };
+  }
+  return jsend('/api/v1/connectors/' + ID, 'PUT', { credential: body });
+}
 
 const HINTS = {
   hardcover: 'Paste your Hardcover API token from hardcover.app/account/api. Syncs your reading progress and shelf status.',
+  microblog: 'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync.',
   readwise: 'Paste your Readwise access token from readwise.io/access_token. Syncs your highlights.',
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.'
+};
+
+const TOKEN_HELP = {
+  microblog: '<div class="muted" style="margin-bottom:18px"><p style="margin-top:0"><b>Get a Micro.blog app token:</b></p>'
+    + '<ol style="padding-left:20px;margin-bottom:10px">'
+    + '<li>Sign in to Micro.blog in another tab.</li>'
+    + '<li>Open <a href="https://micro.blog/account/apps" target="_blank" rel="noopener noreferrer">Account → App tokens</a>.</li>'
+    + '<li>Create a separate token for <b>CrossPoint Sync</b>.</li>'
+    + '<li>Copy the new token and paste it below.</li>'
+    + '</ol><p style="margin-bottom:0">Treat this token like a password: it has full access to your Micro.blog account. CrossPoint Sync encrypts it before storing it.</p></div>'
 };
 
 (async () => {
@@ -549,11 +573,11 @@ function done() { location.href = '/account'; }
 function render(conn) {
   const f = $('form');
   if (conn.credential_kind === 'token') {
-    f.innerHTML = '<label>API token</label><input id="tok" class="mono" placeholder="paste token">'
+    f.innerHTML = (TOKEN_HELP[ID] || '') + '<label>API token</label><input id="tok" class="mono" type="password" placeholder="paste token">'
       + '<button class="primary full mt" id="go">Link ' + esc(conn.name) + '</button><div class="err" id="e"></div>';
     $('go').onclick = async () => {
       $('e').textContent = '';
-      const r = await jsend('/api/v1/connectors/' + ID, 'PUT', { credential: { token: $('tok').value.trim() } });
+      const r = await linkCredential({ token: $('tok').value.trim() });
       if (r.ok) done(); else $('e').textContent = r.data.message || 'Could not link';
     };
   } else if (conn.credential_kind === 'kosync') {
@@ -563,7 +587,7 @@ function render(conn) {
       + '<button class="primary full mt" id="go">Connect server</button><div class="err" id="e"></div>';
     $('go').onclick = async () => {
       $('e').textContent = '';
-      const r = await jsend('/api/v1/connectors/' + ID, 'PUT', { credential: { server: $('srv').value.trim(), username: $('u').value.trim(), password: $('p').value } });
+      const r = await linkCredential({ server: $('srv').value.trim(), username: $('u').value.trim(), password: $('p').value });
       if (r.ok) done(); else $('e').textContent = r.data.message || 'Could not connect';
     };
   } else if (conn.credential_kind === 'abs') {
@@ -572,7 +596,7 @@ function render(conn) {
       + '<button class="primary full mt" id="go">Connect Audiobookshelf</button><div class="err" id="e"></div>';
     $('go').onclick = async () => {
       $('e').textContent = '';
-      const r = await jsend('/api/v1/connectors/' + ID, 'PUT', { credential: { server: $('srv').value.trim(), token: $('tok').value.trim() } });
+      const r = await linkCredential({ server: $('srv').value.trim(), token: $('tok').value.trim() });
       if (r.ok) done(); else $('e').textContent = r.data.message || 'Could not connect';
     };
   } else if (conn.credential_kind === 'device_code') {
@@ -618,7 +642,7 @@ const REVIEW = shell(
 <script>
 const ID = decodeURIComponent(location.pathname.split('/').pop());
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 async function jget(u){ const r = await fetch(u); return { ok:r.ok, status:r.status, data: await r.json().catch(()=>({})) }; }
 async function jsend(u, m='PUT', body){ const r = await fetch(u,{method:m,headers:body?{'content-type':'application/json'}:undefined, body: body?JSON.stringify(body):undefined}); return { ok:r.ok, data: await r.json().catch(()=>({})) }; }
 

@@ -7,6 +7,7 @@ and any KOReader device.
   only the sync-server URL. Same accounts, same auth, same endpoints as `sync.koreader.rocks`.
 - **Better multi-device sync.** Progress is stored per device and the newest position wins, fixing
   the ping-pong you get with stock kosync servers.
+- **Server-side service connectors.** Link services such as Hardcover, Micro.blog, and Audiobookshelf once; readers continue speaking standard KOSync while the server updates external reading state.
 - **Lossless CrossPoint sync.** An extended API carries the full CrossPoint position (spine,
   paragraph, anchor, page hints), not just a lossy xpath + percentage.
 - **Bookmarks, clippings, and reading stats.** Delta sync with tombstones for bookmarks and
@@ -58,7 +59,18 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 | `DATABASE_PATH` | `/data/crosspoint.db` | SQLite file (parent dirs auto-created) |
 | `REGISTRATION_DISABLED` | `false` | Set `true` to lock down a private instance |
 | `AUTH_RATE_LIMIT_PER_MINUTE` | `30` | Per-IP limit on registration (0 disables) |
-| `TOKEN_ENC_KEY` | _(unset)_ | Enables connectors (Hardcover/Readwise sync). 64 hex chars, a base64 32-byte key, or a ≥32-char passphrase. Encrypts stored connector credentials at rest; unset = connectors disabled. |
+| `TOKEN_ENC_KEY` | _(unset)_ | Enables external-service connectors. 64 hex chars, a base64 32-byte key, or a ≥32-char passphrase. Encrypts stored connector credentials at rest; unset = connectors disabled. |
+| `TRUST_PROXY` | `false` | Set `true` only when direct access is blocked and a trusted reverse proxy overwrites any client-supplied `X-Forwarded-Proto`; permits connector linking through an HTTPS-terminating proxy. |
+
+### Link Micro.blog
+
+1. Sign in to [Micro.blog](https://micro.blog/).
+2. Open [Account → App tokens](https://micro.blog/account/apps).
+3. Create a separate app token for **CrossPoint Sync**.
+4. In CrossPoint Sync, open your account, choose **Micro.blog**, and paste the new token.
+
+Treat the token like a password: Micro.blog app tokens have full account access. CrossPoint Sync
+encrypts the token at rest using `TOKEN_ENC_KEY`.
 
 ## Point your reader at it
 

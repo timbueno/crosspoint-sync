@@ -250,11 +250,11 @@ export function documentForExternal(
   return row?.document ?? null;
 }
 
-/** The newest stored progress percentage for a document (any device), or null. */
+/** The canonical progress percentage, using the same ordering as the KOSync endpoint. */
 export function latestPercentage(db: DB, userId: number, document: string): number | null {
   const row = db
     .prepare(
-      'SELECT percentage FROM progress WHERE user_id = ? AND document = ? ORDER BY updated_at DESC LIMIT 1'
+      'SELECT percentage FROM progress WHERE user_id = ? AND document = ? ORDER BY updated_at DESC, device_id LIMIT 1'
     )
     .get(userId, document) as { percentage: number } | undefined;
   return row?.percentage ?? null;

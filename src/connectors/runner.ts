@@ -14,11 +14,17 @@ import {
   documentMeta,
   getAccount,
   getMatch,
+  latestPercentage,
   saveMatch,
   setAccountStatus,
 } from './store.js';
 import { decideMatch, extractTitleAuthor } from './matching.js';
-import type { HttpTransport, Match, OutboundEvent } from './types.js';
+import {
+  ConnectorOperationError,
+  type HttpTransport,
+  type Match,
+  type OutboundEvent,
+} from './types.js';
 
 /**
  * Resolve a connector match for a document, using the cached row when present.
@@ -30,7 +36,8 @@ export async function resolveMatch(
   connectorId: string,
   userId: number,
   document: string,
-  http: HttpTransport
+  http: HttpTransport,
+  ev?: OutboundEvent
 ): Promise<Match | null> {
   const cached = getMatch(db, userId, connectorId, document);
   if (cached && cached.source === 'manual') {
@@ -81,7 +88,11 @@ export async function resolveMatch(
   }
 
   if (!match) {
-    match = await connector.match(cred, meta, http);
+    match = await connector.match(cred, meta, http, ev);
+  }
+
+  if (!match && ev && connector.createBook) {
+    match = await connector.createBook(cred, meta, ev, http);
   }
 
   saveMatch(db, userId, connectorId, document, match, match ? 'auto' : 'none');
@@ -105,11 +116,20 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     return;
   }
 
+  const ev = JSON.parse(row.payload) as OutboundEvent;
+  if (connector.shouldPush?.(
+    ev,
+    latestPercentage(db, row.user_id, row.document)
+  ) === false) {
+    markDone(db, row.id);
+    return;
+  }
+
   let match: Match | null;
   try {
-    match = await resolveMatch(db, row.connector_id, row.user_id, row.document, http);
+    match = await resolveMatch(db, row.connector_id, row.user_id, row.document, http, ev);
   } catch (err) {
-    markFailed(db, row, `match failed: ${errStr(err)}`, true);
+    failOperation(db, row, err, 'match failed');
     return;
   }
   if (!match) {
@@ -119,7 +139,6 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     return;
   }
 
-  const ev = JSON.parse(row.payload) as OutboundEvent;
   const cred = decryptCredential(account);
   try {
     const result = await connector.push(cred, match, ev, http);
@@ -133,9 +152,18 @@ export async function processRow(db: DB, row: QueueRow, http: HttpTransport): Pr
     logPushFailure(row, result.error, result.retryable);
     markFailed(db, row, result.error, result.retryable);
   } catch (err) {
-    logPushFailure(row, errStr(err), true);
-    markFailed(db, row, errStr(err), true);
+    failOperation(db, row, err, 'push failed');
   }
+}
+
+function failOperation(db: DB, row: QueueRow, err: unknown, prefix: string): void {
+  const error = `${prefix}: ${errStr(err)}`;
+  const retryable = err instanceof ConnectorOperationError ? err.retryable : true;
+  if (err instanceof ConnectorOperationError && err.needsReauth) {
+    setAccountStatus(db, row.user_id, row.connector_id, 'needs_reauth', err.message);
+  }
+  logPushFailure(row, error, retryable);
+  markFailed(db, row, error, retryable);
 }
 
 /** Surface a push failure in stdout (Railway/Docker logs), not just the DB row. */

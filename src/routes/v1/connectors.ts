@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { withTransaction, type DB } from '../../db/db.js';
 import { kosyncError, type AppEnv } from '../../auth/middleware.js';
 import { secretsEnabled } from '../../crypto/secrets.js';
@@ -19,6 +19,26 @@ import {
 import { isValidDocument } from '../kosync.js';
 import type { HttpTransport } from '../../connectors/types.js';
 
+function loopbackHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+}
+
+function loopbackAddress(address: string): boolean {
+  return address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.');
+}
+
+function credentialRequestIsSecure(c: Context<AppEnv>, trustProxy: boolean): boolean {
+  const url = new URL(c.req.url);
+  if (url.protocol === 'https:') return true;
+  const incoming = c.env?.incoming;
+  const peerAddress = incoming?.socket?.remoteAddress;
+  if (loopbackHostname(url.hostname) && (!incoming || (peerAddress && loopbackAddress(peerAddress)))) {
+    return true;
+  }
+  return trustProxy
+    && c.req.header('x-forwarded-proto')?.split(',')[0].trim().toLowerCase() === 'https';
+}
+
 /**
  * Master-sync-hub connector management. Same x-auth headers as the rest of v1.
  * Credential entry realistically happens from a browser (token paste / OAuth),
@@ -27,7 +47,11 @@ import type { HttpTransport } from '../../connectors/types.js';
  * `transport` is injectable so tests can validate/link connectors without real
  * network calls.
  */
-export function connectorRoutes(db: DB, transport: HttpTransport = fetchTransport): Hono<AppEnv> {
+export function connectorRoutes(
+  db: DB,
+  transport: HttpTransport = fetchTransport,
+  trustProxy = false
+): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   // List available connectors + this user's link status.
@@ -59,6 +83,9 @@ export function connectorRoutes(db: DB, transport: HttpTransport = fetchTranspor
   app.put('/connectors/:id', async (c) => {
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    if (!credentialRequestIsSecure(c, trustProxy)) {
+      return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
+    }
     if (!secretsEnabled()) {
       return c.json(
         { code: 2003, message: 'Server has no TOKEN_ENC_KEY; connector storage disabled' },
@@ -90,6 +117,9 @@ export function connectorRoutes(db: DB, transport: HttpTransport = fetchTranspor
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
     if (!conn.beginLink) return c.json({ code: 2003, message: 'Connector has no device link' }, 400);
+    if (!credentialRequestIsSecure(c, trustProxy)) {
+      return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
+    }
     if (!secretsEnabled()) {
       return c.json({ code: 2003, message: 'Server has no TOKEN_ENC_KEY; connector storage disabled' }, 403);
     }
@@ -112,6 +142,9 @@ export function connectorRoutes(db: DB, transport: HttpTransport = fetchTranspor
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
     if (!conn.pollLink) return c.json({ code: 2003, message: 'Connector has no device link' }, 400);
+    if (!credentialRequestIsSecure(c, trustProxy)) {
+      return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
+    }
     let deviceCode: unknown;
     try {
       deviceCode = ((await c.req.json()) as Record<string, unknown>).device_code;
